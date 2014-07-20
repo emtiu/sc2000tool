@@ -43,9 +43,9 @@ So far, sc2000tool has only been tested on one setup:
 * **Known working**
   * **Platform:** Linux 64-bit with Python 2.7.3
   * **Sim City 2000:** MS-DOS, rev. 1.01
-  * **Emulation:** DOSBox 0.74
+  * **… running in:** DOSBox 0.74
 
-I'd love to see that list grow, especially for Sim City 2000 on other platforms like Mac or Windwos. Any report of success or failure is greatly appreciated!
+I'd love to see that list grow, especially for Sim City 2000 on other platforms like Mac or Windows. Any report of success or failure is greatly appreciated!
 
 ## Documentation
 
