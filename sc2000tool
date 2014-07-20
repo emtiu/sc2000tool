@@ -1,0 +1,340 @@
+#!/usr/bin/env python2
+
+'''
+Most of what this program does is an application of the research by
+David Moews published here: http://djm.cc/simcity-2000-info.txt
+and included in file sc2kinfo_moews.txt as archived in July 2014.
+
+Call without arguments for syntax.
+
+Written by Michael Bueker (mb~at~michael-bueker.de) in 2014.
+Published under the WTFPLv2. Full license text in file LICENSE.
+'''
+
+
+###
+# Imports and definitions
+###
+
+import sys
+import os
+import argparse
+import chunk
+import struct
+try:
+  from cStringIO import StringIO
+except ImportError:
+  from StringIO import StringIO
+
+class NoSuchIFFChunkError(Exception):
+  def __str__(self):
+   return "Chunk %s not found in %s." % (self.args[0], self.args[1])
+class InvalidSC2Error(Exception):
+  def __str__(self):
+   return "Invalid .SC2 data: %s" % self.args[0]
+class DataWontFitError(Exception):
+  def __str__(self):
+   return "%s won't fit. Limit: %s." % (self.args[0], self.args[1])
+
+
+###
+# Command line arguments
+###
+
+ArgP = argparse.ArgumentParser(prog="sc2000tool", description="Analysis and certain modifications of Sim City 2000 save files (*.SC2).", add_help=False)
+reqGrp = ArgP.add_argument_group('required')
+reqGrp.add_argument('file', type=argparse.FileType('r'), help="the savegame file to be read")
+gamGrp = ArgP.add_argument_group('city analysis')
+gamGrp.add_argument('-c', '--city', action='store_true', help="display information about the saved city")
+gamGrp.add_argument('-n', dest='outname', action='store_true', help="output city name only")
+gamGrp.add_argument('-m', dest='outmoney', action='store_true', help="output amount of money only")
+gamGrp.add_argument('-d', dest='outdate', action='store_true', help="output current game date only (YYYY-DD-MM)")
+modGrp = ArgP.add_argument_group('city modification')
+modGrp.add_argument('-O', metavar='filename', dest='outfile', help="save modified city to this file (must not exist)")
+modGrp.add_argument('-M', metavar='<int>', dest='newmoney', help="set city's amount of money")
+modGrp.add_argument('-N', metavar='"City Name"', dest='newname', help="set city name")
+modGrp.add_argument('-Y', metavar='"Mayor Name"', dest='newmayor', help="set mayor name")
+diaGrp = ArgP.add_argument_group('diagnostics')
+diaGrp.add_argument('-f', '--fileinfo', action='store_true', help="display information about the save file")
+diaGrp.add_argument('-e', dest='expCom', metavar='CHNK', help="save compressed IFF chunk CHNK in <file>_c<CHNK>.dat")
+diaGrp.add_argument('-E', dest='expDec', metavar='CHNK', help="save decompressed IFF chunk CHNK in <file>_d<CHNK>.dat")
+diaGrp.add_argument('-t', dest='comptest', action='store_true', help="perform compression test")
+glbGrp = ArgP.add_argument_group('global')
+glbGrp.add_argument('-h', "--help", action="help", help="show this help message and exit")
+glbGrp.add_argument('--version', action='version', version='%(prog)s 0.0.1')
+if len(sys.argv)==1:
+    ArgP.print_help()
+    sys.exit(1)
+Args = ArgP.parse_args()
+
+
+###
+# Functions: Data IO
+###
+
+def decompress(cData):    # decompress Sim City 2000 custom run length compression,
+  inBuf = StringIO(cData) # not IFF packing!
+  outBuf = StringIO()
+  while True:
+    inB = inBuf.read(1)
+    if inB == '': break                # detect end of data
+    inN = struct.unpack('B',inB)[0]
+    if inN < 128:                      # simple data bytes follow
+      outBuf.write(inBuf.read(inN))
+    elif inN > 128:                    # compressed (repeated) data byte follows
+      outBuf.writelines( [inBuf.read(1)]*(inN-127) )
+  inBuf.close()
+  dData = outBuf.getvalue()
+  outBuf.close()
+  return dData
+
+def compress(Data):
+  inBuf = StringIO(Data[::-1]) # compressing backwards for easier length handling
+  outBuf = StringIO()
+  ### walk through data (backwards)
+  while True:
+    conC = 0
+    repC = 1
+    refByte = inBuf.read(1)
+    nextByte = inBuf.read(1)
+    ### byte matches next byte
+    while nextByte == refByte:
+      repC += 1
+      nextByte = inBuf.read(1)
+    if repC > 1:
+      if repC <= 128:
+        outBuf.write( struct.pack('cB', refByte,repC+127) )
+      elif repC > 128:        # tail first, because backwards
+        if (repC%128) == 0:   # special case n*128 for n>1: no tail
+          pass
+        elif (repC%128) == 1: # special case n*128+1: no rep in tail
+          outBuf.write( struct.pack('cB', refByte,1) )
+        else:
+          outBuf.write( struct.pack('cB', refByte,(repC%128)+127) )
+        for i in range(repC/128): # body after tail, because backwards
+          outBuf.write( struct.pack('cB', refByte,255) )
+      if not nextByte == '':
+        inBuf.seek(-1,1)
+        continue
+      else:
+        break
+    ### byte differs from next byte
+    cBuf = StringIO()
+    while nextByte != refByte:
+      cBuf.write(refByte)
+      conC += 1
+      refByte = nextByte
+      nextByte = inBuf.read(1)
+    if conC > 0:
+      if conC < 128:
+        cBuf.write( struct.pack('B', conC) )
+        outBuf.write(cBuf.getvalue())
+      elif conC >= 128:
+        cBuf.seek(0)
+        outBuf.write(cBuf.read(conC % 127))
+        outBuf.write( struct.pack('B', conC % 127) )
+        for i in range(conC/127):
+          outBuf.write(cBuf.read(127))
+          outBuf.write( struct.pack('B',127) )
+      cBuf.close()
+      if not refByte == nextByte == '':
+        inBuf.seek(-2,1)
+        continue
+      else:
+        break
+  ### pack it up
+  inBuf.close()
+  cData = outBuf.getvalue()[::-1] # backwards, remember?
+  outBuf.close()
+  return cData
+
+def loadSC2file(SC2file): # unpack IFF and decompress data
+  cSC2 = {}               # compressed IFF chunks
+  SC2 = {}                # uncompressed data
+  Fhead = SC2file.read(12)
+  Ui = struct.unpack('>4cI4c',Fhead)
+  if Args.fileinfo: print "File header:", Ui
+  if not ( Ui[:4] == tuple('FORM') and Ui[5:] == tuple('SCDH') ):
+    raise InvalidSC2Error("Bad header: Not a Sim City 2000 IFF file.")
+  if not Ui[4] == os.fstat(Args.file.fileno()).st_size-8:
+    raise InvalidSC2Error("Bad header: Wrong file length in header.")
+
+  while True:
+    try:
+      inC = chunk.Chunk(SC2file, align=False)
+    except EOFError:
+      break
+    else:
+      cSC2[inC.getname()] = inC.read()
+      if inC.getname() in ['ALTM','CNAM']: # these chunks are always uncompressed
+        SC2[inC.getname()] = cSC2[inC.getname()]
+      else:
+        SC2[inC.getname()] = decompress(cSC2[inC.getname()])
+      if Args.fileinfo:
+        print "Found chunk %s. Size (compressed/decompressed): %i/%i" % \
+          (inC.getname(), inC.getsize(), len(SC2[inC.getname()]))
+      inC.close()
+
+  SC2file.close()
+  return cSC2, SC2
+
+def buildSC2outfile(cSC2orig, SC2outCh):
+  chOrder = ['MISC','ALTM','XTER','XBLD','XZON','XUND','XTXT','XLAB','XMIC','XTHG','XBIT', \
+    'XTRF','XPLT','XVAL','XCRM','XPLC','XFIR','XPOP','XROG','XGRP','CNAM']
+  SC2outData = "SCDH"
+
+  for inCh in chOrder:
+    if SC2outCh.has_key(inCh):
+      if not inCh in ['ALTM','CNAM']:
+        thisChunk = compress(SC2outCh[inCh])
+      else:
+        thisChunk = SC2outCh[inCh]
+      SC2outData += inCh
+      SC2outData += struct.pack('>i',len(thisChunk))
+      SC2outData += thisChunk
+    else:
+      try:
+        thisChunk = cSC2orig[inCh]
+      except KeyError:   # CNAM chunk may be missing
+        if inCh == 'CNAM': pass
+        else:              raise
+      else:
+        SC2outData += inCh
+        SC2outData += struct.pack('>i',len(thisChunk))
+        SC2outData += thisChunk
+
+  return "FORM" + struct.pack('>i',len(SC2outData)) + SC2outData
+
+
+###
+# Functions: Diagnostics
+###
+
+def compresstest(CHK, dCHK):
+  return compress(dCHK) == CHK
+
+def exportchunk(inSC2, chnk, filename, note):
+  try:
+    outdata = inSC2[chnk]
+  except KeyError:
+    raise NoSuchIFFChunkError(chnk, filename)
+  else:
+    with open("%s_%s%s.dat" % (os.path.splitext(os.path.basename(filename))[0],note,chnk), 'w') as outdatafile:
+      outdatafile.write(outdata)
+
+
+###
+# Functions: Read game data
+###
+
+def getMiscNum(nID, inMisc):
+  return struct.unpack('>i',inMisc[4*nID:4*nID+4])[0]
+
+def cityName(inSC2):
+  if 'CNAM' in inSC2.keys():
+    nameLen = struct.unpack('B',inSC2['CNAM'][0])[0]
+    return ''.join(struct.unpack('%ic' % (nameLen),inSC2['CNAM'][1:nameLen+1]))
+  else:
+    return "<none>"
+
+def mayorName(inSC2):
+  mayLen = struct.unpack('B',inSC2['XLAB'][0])[0]
+  return ''.join(struct.unpack('%ic'%mayLen, inSC2['XLAB'][1:mayLen+1]))
+
+def cityFounded(inSC2):
+  return getMiscNum(3, inSC2['MISC'])
+
+def money(inSC2):
+  return getMiscNum(5, inSC2['MISC'])
+
+def cityDate(inSC2, iso=False):
+  tDays = getMiscNum(4, inSC2['MISC'])
+  if tDays == 0:
+    if not iso: return "<not started>"
+    elif iso:   return "0000-00-00"
+  pYears = tDays / (12*25)
+  pMonths = (tDays - pYears*(12*25)) / 25
+  pDays = tDays+1 - pYears*(12*25) - pMonths*25
+  if not iso:
+    mNames = ["January","February","March","April","May","June","July","August","September","October","November","December"]
+    return "%s %i, %i" % (mNames[pMonths], pDays, cityFounded(inSC2)+pYears)
+  elif iso:
+    return "%i-%02i-%02i" % (cityFounded(inSC2)+pYears, pMonths+1, pDays)
+
+
+###
+# Functions: Write game data
+###
+
+def putMiscNum(nID, value, inMisc):
+  try:
+    return inMisc[:4*nID] + struct.pack('>i',value) + inMisc[4*nID+4:]
+  except struct.error:
+    raise DataWontFitError("Amount of money", "-2,147,483,648 to 2,147,483,647")
+
+def putLabel(lID, value, inXLAB):
+  if len(value) > 24:
+    raise DataWontFitError("Mayor name", "24 characters")
+  else:
+    return inXLAB[:25*lID] + struct.pack('B',len(value)) + value + '\x00'*(25-len(value)-1) + inXLAB[25*lID+25:]
+
+def putCityName(value):
+  if len(value) > 31:
+    raise DataWontFitError("City name", "31 characters")
+  else:
+    return struct.pack('B',len(value)) + value + '\x00'*(32-len(value)-1)
+
+
+###
+# Main program
+###
+
+cSC2, SC2 = loadSC2file(Args.file)
+
+if Args.city:
+  print "City name: " + cityName(SC2)
+  print "Mayor name: " + mayorName(SC2)
+  print "Year founded: %i" % cityFounded(SC2)
+  print "Current Date: %s" % cityDate(SC2)
+  print "Money: $%s" % "{:,}".format(money(SC2))
+
+if Args.outname:
+  print cityName(SC2)
+if Args.outmoney:
+  print money(SC2)
+if Args.outdate:
+  print cityDate(SC2, iso=True)
+
+if Args.newmoney or Args.newname or Args.newmayor:
+  if not Args.outfile:
+    raise IOError("No destination file for modifications specified. Use -O.")
+  if os.path.exists(Args.outfile):
+    raise IOError("%s exists! Not overwriting." % Args.outfile)
+  outSC2 = {}
+  if Args.newmoney:
+    outSC2['MISC'] = putMiscNum(5, int(Args.newmoney), SC2['MISC'])
+  if Args.newname:
+    outSC2['CNAM'] = putCityName(Args.newname)
+  if Args.newmayor:
+    outSC2['XLAB'] = putLabel(0, Args.newmayor, SC2['XLAB'])
+  with open(Args.outfile,'w') as outfile:
+    outfile.write(buildSC2outfile(cSC2, outSC2))
+
+if Args.comptest:
+  print "Compression test ...",
+  comparison = {}
+  for chunk in SC2.keys():
+    if not chunk in ['ALTM','CNAM']: # skip chunks that are always uncompressed
+      comparison[chunk] = compresstest(cSC2[chunk], SC2[chunk]) # assigns True or False
+  if not False in comparison.values():
+    print "passed! (all %i IFF chunks)" % len(comparison)
+  elif comparison.values().count(False) == 1 and comparison['XTHG'] == False:
+    print "passed! (%i ouf of %i IFF chunks, plus what's probably a harmless glitch in chunk XTHG.)" % (len(comparison)-1, len(comparison))
+  else:
+    print "passed for %i out of %i IFF chunks, but failed for: %s" \
+      % ( comparison.values().count(True), len(comparison), ', '.join([ r for r in comparison.keys() if comparison[r]==False ]) )
+
+if Args.expDec:
+  exportchunk(SC2, Args.expDec.upper(), Args.file.name, 'd')
+if Args.expCom:
+  exportchunk(cSC2, Args.expCom.upper(), Args.file.name, 'c')
