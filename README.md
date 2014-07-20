@@ -1,4 +1,4 @@
-sc2000tool
+sc2000tool [![Flattr this repository](http://api.flattr.com/button/flattr-badge-large.png)](https://flattr.com/submit/auto?user_id=mtu&url=http://github.com/emtiu/sc2000tool/&title=sc2000tool&language=de&tags=github&category=software)
 ==========
 
 A command line utility for analysis and certain modifications of Sim City 2000 savegames (*.SC2). Main features:
@@ -10,7 +10,7 @@ A command line utility for analysis and certain modifications of Sim City 2000 s
 
 ## Use cases and example
 
-Sim City 2000 offers no convenient way of changing the name of a city (which is chosen upon starting a new game) or the mayor's name (which is determined at game installation). If you play an existing savegame and/or a an abandonware version of the game, you're probably stuch with names others have chosen. *(This is what got me started on this project in the first place.)*
+Sim City 2000 offers no convenient way of changing the name of a city (which is chosen upon starting a new game) or the mayor's name (which is determined at game installation). If you play an existing savegame and/or a an abandonware version of the game, you're probably stuck with names that others have chosen. *(This is what got me started on this project in the first place.)*
 
 Also, most money cheats are clumsy. Available tools (usually DOS or Windows binaries)  will usually just give you the maximum possible amount of money ($2,147,483,647), which is uselessly close to where the variable overflows. Other cheats require you to jump through hoops in-game or get down and dirty with a hex editor.
 
@@ -53,7 +53,9 @@ All of sc2000tool's features are listed in its built-in help. Simply call it wit
 
 When in doubt, take a peek at the code. It's scarcely commmented, but hey, at least it's not Perl ;)
 
-Of course, I'm also glad to take your questions here, on Twitter or by email. I'm immensely interested in whether anybody besides myself will want use this.
+## Feedback
+
+I'm immensely interested in whether anybody besides myself will want use this, so I'll be glad to take your questions or comments here, on Twitter or by email.
 
 ## Credit
 
