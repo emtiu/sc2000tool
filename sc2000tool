@@ -230,6 +230,10 @@ def exportchunk(inSC2, chnk, filename, note):
 def getMiscNum(nID, inMisc):
   return struct.unpack('>i',inMisc[4*nID:4*nID+4])[0]
 
+def getLabel(lID, inXLAB):
+  length = struct.unpack('B',inXLAB[25*lID])[0]
+  return ''.join(struct.unpack( '%ic'%length, inXLAB[ 25*lID+1 : 25*lID+1+length ] ))
+
 def cityName(inSC2):
   if 'CNAM' in inSC2.keys():
     nameLen = struct.unpack('B',inSC2['CNAM'][0])[0]
@@ -238,8 +242,7 @@ def cityName(inSC2):
     return "<none>"
 
 def mayorName(inSC2):
-  mayLen = struct.unpack('B',inSC2['XLAB'][0])[0]
-  return ''.join(struct.unpack('%ic'%mayLen, inSC2['XLAB'][1:mayLen+1]))
+  return getLabel(0, inSC2['XLAB'])
 
 def cityFounded(inSC2):
   return getMiscNum(3, inSC2['MISC'])
