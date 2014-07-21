@@ -45,7 +45,8 @@ ArgP = argparse.ArgumentParser(prog="sc2000tool", description="Analysis and cert
 reqGrp = ArgP.add_argument_group('required')
 reqGrp.add_argument('file', type=argparse.FileType('r'), help="the savegame file to be read")
 gamGrp = ArgP.add_argument_group('city analysis')
-gamGrp.add_argument('-c', '--city', action='store_true', help="display information about the saved city")
+gamGrp.add_argument('-c', '--city', action='store_true', help="display information summary about the saved city")
+gamGrp.add_argument('-t', dest='teams', action='store_true', help="output the names of sports teams")
 gamGrp.add_argument('-n', dest='outname', action='store_true', help="output city name only")
 gamGrp.add_argument('-m', dest='outmoney', action='store_true', help="output amount of money only")
 gamGrp.add_argument('-d', dest='outdate', action='store_true', help="output current game date only (YYYY-DD-MM)")
@@ -54,11 +55,12 @@ modGrp.add_argument('-O', metavar='filename', dest='outfile', help="save modifie
 modGrp.add_argument('-M', metavar='<int>', dest='newmoney', help="set city's amount of money")
 modGrp.add_argument('-N', metavar='"City Name"', dest='newname', help="set city name")
 modGrp.add_argument('-Y', metavar='"Mayor Name"', dest='newmayor', help="set mayor name")
+modGrp.add_argument('-T', nargs=2, metavar=('<sport>','"Name"'), dest='newteam', help="set name of sports team (sports: football, baseball, soccer, cricket, rugby)")
 diaGrp = ArgP.add_argument_group('diagnostics')
 diaGrp.add_argument('-f', '--fileinfo', action='store_true', help="display information about the save file")
 diaGrp.add_argument('-e', dest='expCom', metavar='CHNK', help="save compressed IFF chunk CHNK in <file>_c<CHNK>.dat")
 diaGrp.add_argument('-E', dest='expDec', metavar='CHNK', help="save decompressed IFF chunk CHNK in <file>_d<CHNK>.dat")
-diaGrp.add_argument('-t', dest='comptest', action='store_true', help="perform compression test")
+diaGrp.add_argument('--compresstest', dest='comptest', action='store_true', help="perform compression test")
 glbGrp = ArgP.add_argument_group('global')
 glbGrp.add_argument('-h', "--help", action="help", help="show this help message and exit")
 glbGrp.add_argument('--version', action='version', version='%(prog)s 0.0.1')
@@ -67,6 +69,10 @@ if len(sys.argv)==1:
     sys.exit(1)
 Args = ArgP.parse_args()
 
+sportsTeams = {'Football':251, 'Baseball':252, 'Soccer':253, 'Cricket':254, 'Rugby':255}
+if Args.newteam:
+  if not Args.newteam[0].capitalize() in sportsTeams.keys():
+    raise ValueError("No such sport: %s"%Args.newteam[0].capitalize())
 
 ###
 # Functions: Data IO
@@ -301,6 +307,10 @@ if Args.city:
   print "Current Date: %s" % cityDate(SC2)
   print "Money: $%s" % "{:,}".format(money(SC2))
 
+if Args.teams:
+  for T in sportsTeams.keys():
+    print '{:<14}'.format("%s team:"%T), getLabel(sportsTeams[T],SC2['XLAB'])
+
 if Args.outname:
   print cityName(SC2)
 if Args.outmoney:
@@ -308,7 +318,7 @@ if Args.outmoney:
 if Args.outdate:
   print cityDate(SC2, iso=True)
 
-if Args.newmoney or Args.newname or Args.newmayor:
+if Args.newmoney or Args.newname or Args.newmayor or Args.newteam:
   if not Args.outfile:
     raise IOError("No destination file for modifications specified. Use -O.")
   if os.path.exists(Args.outfile):
@@ -320,6 +330,11 @@ if Args.newmoney or Args.newname or Args.newmayor:
     outSC2['CNAM'] = putCityName(Args.newname)
   if Args.newmayor:
     outSC2['XLAB'] = putLabel(0, Args.newmayor, SC2['XLAB'])
+  if Args.newteam:
+    latestSC2 = SC2
+    if outSC2.has_key('XLAB'):
+      latestSC2 = outSC2
+    outSC2['XLAB'] = putLabel(sportsTeams[Args.newteam[0].capitalize()], Args.newteam[1], latestSC2['XLAB'])
   with open(Args.outfile,'w') as outfile:
     outfile.write(buildSC2outfile(cSC2, outSC2))
 
